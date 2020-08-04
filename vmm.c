@@ -45,12 +45,15 @@ struct TLBEntry
 struct TLBEntry tlb[TLBSIZE];
 
 /**
- * THese two variables can be used to make the next available frame 
+ * These two variables can be used to make the next available frame 
  * or page table entry.
  */ 
 int availableFrameIndex = 0;
 int availablePageTableIndex = 0;
 
+
+int getFrame(int pageNumber, FILE* backingStore);
+int readBackingStore(int pageNumber, FILE* backingStore);
 
 /**
  * takes 2 commands line args
@@ -125,9 +128,13 @@ int main(int argc, char *argv[])
         page_number = get_page_num(logical_address);
         frame_offset = get_frame_offset(logical_address);
 
-        printf("Virtual Address %5d, Page Number: %3d, Fame Offset: %3d\n", logical_address, page_number, frame_offset);
+        //get the frame number and the data at the physical address
+        int frameNumber = getFrame(page_number,backing_store_file);
+        data_read = physical_memory[frameNumber].data[frame_offset];
 
-        //printf("Virtual address: %d Physical address: %d Value: %d\n", logical_address, (physical_address << 8) | frame_offset, data_read);
+        //printf("Virtual Address %5d, Page Number: %3d, Frame Offset: %3d\n", logical_address, page_number, frame_offset);
+
+        printf("Virtual address: %d Physical address: %d Value: %d\n", logical_address, (frameNumber << 8) | frame_offset, data_read);
     }
 
     float hit_rate = (float)tlb_hits / num_addresses_translated;
@@ -136,3 +143,42 @@ int main(int argc, char *argv[])
     fclose(addresses_to_translate);
     fclose(backing_store_file);
 }
+
+int getFrame(int pageNumber, FILE* backingStore) {
+    //checks tlb for frame number
+    // for(int i = 0; i < TLBSIZE; i++) {
+    //     if (tlb[i].page_number == pageNumber) {
+    //         return tlb[i].frame_number;
+    //     }
+    // }
+    //checks page table if tlb misses
+    for (int i = 0; i < PAGETABLESIZE; i++) {
+        if (page_table[i].page_number == pageNumber) {
+            return page_table[i].frame_number;
+        }        
+    }
+    //reads from backing store after both tlb and page table miss
+    return readBackingStore(pageNumber, backingStore);
+}
+
+int readBackingStore(int pageNumber, FILE* backingStore) {
+    signed char pageBuffer[FRAMESIZE];
+    fseek(backingStore, FRAMESIZE*pageNumber, SEEK_SET);
+    fread(pageBuffer, sizeof(char), FRAMESIZE, backingStore);
+
+    //put read data into main memory
+    for(int i=0; i < FRAMESIZE; i++){
+        physical_memory[availableFrameIndex].data[i] = pageBuffer[i];
+    }
+
+    //add frame and page number to page table's next empty spot
+    page_table[availablePageTableIndex].page_number = pageNumber;
+    page_table[availablePageTableIndex].frame_number = availableFrameIndex;
+    
+    //increment next available frame index in MM
+    availableFrameIndex++;
+    //return the frame and increment the next available page entry counter
+    return page_table[availablePageTableIndex++].frame_number;
+}
+
+
