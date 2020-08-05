@@ -50,10 +50,16 @@ struct TLBEntry tlb[TLBSIZE];
  */ 
 int availableFrameIndex = 0;
 int availablePageTableIndex = 0;
+int TLBEntryCounter =0;
+//statistical variables
+int page_fault = 0;
+int tlb_hits = 0;
+int num_addresses_translated = 0;
 
 
 int getFrame(int pageNumber, FILE* backingStore);
 int readBackingStore(int pageNumber, FILE* backingStore);
+void insertToTLB(int pageNumber, int frameNumber);
 
 /**
  * takes 2 commands line args
@@ -78,10 +84,6 @@ int main(int argc, char *argv[])
     
     char *address_text_filename;
     char *backing_store_filename;
-    //statistic variables
-    int page_fault = 0;
-    int tlb_hits = 0;
-    int num_addresses_translated = 0;
     
     address_text_filename = argv[1];
     backing_store_filename = argv[2];
@@ -131,6 +133,7 @@ int main(int argc, char *argv[])
         //get the frame number and the data at the physical address
         int frameNumber = getFrame(page_number,backing_store_file);
         data_read = physical_memory[frameNumber].data[frame_offset];
+        insertToTLB(page_number, frameNumber);
 
         //printf("Virtual Address %5d, Page Number: %3d, Frame Offset: %3d\n", logical_address, page_number, frame_offset);
 
@@ -146,11 +149,12 @@ int main(int argc, char *argv[])
 
 int getFrame(int pageNumber, FILE* backingStore) {
     //checks tlb for frame number
-    // for(int i = 0; i < TLBSIZE; i++) {
-    //     if (tlb[i].page_number == pageNumber) {
-    //         return tlb[i].frame_number;
-    //     }
-    // }
+    for(int i = 0; i < TLBSIZE; i++) {
+        if (tlb[i].page_number == pageNumber) {
+            tlb_hits++;
+            return tlb[i].frame_number;
+        }
+    }
     //checks page table if tlb misses
     for (int i = 0; i < PAGETABLESIZE; i++) {
         if (page_table[i].page_number == pageNumber) {
@@ -177,8 +181,49 @@ int readBackingStore(int pageNumber, FILE* backingStore) {
     
     //increment next available frame index in MM
     availableFrameIndex++;
+    page_fault++;
     //return the frame and increment the next available page entry counter
     return page_table[availablePageTableIndex++].frame_number;
+}
+void insertToTLB(int pageNumber, int frameNumber) {
+    int found = 0;
+    //check if current page is already in the tlb
+    for(int i=0; i < TLBSIZE; i++) {
+        if(tlb[i].page_number == pageNumber) {
+            tlb[i].last_accessed = 0;
+            found++;
+        } else {
+            //check if valid entry to increase last accessed counter
+            if(tlb[i].last_accessed >= 0) {
+                tlb[i].last_accessed++;
+            }
+        }
+    }
+    //can break out of function if already in tlb
+    if(found == 1) {
+        return;
+    }
+
+    //check if there is any empty room
+    if (TLBEntryCounter < TLBSIZE){
+        tlb[TLBEntryCounter].frame_number = frameNumber;
+        tlb[TLBEntryCounter].page_number = pageNumber;
+        tlb[TLBEntryCounter].last_accessed = 0;
+        TLBEntryCounter++;
+    } else { //needs swapping with LRU
+        int LRU = tlb[0].last_accessed; //keeps track of highest last accessed number
+        int index = 0; // keeps track of the LRU index to be swapped
+        for(int i=1; i < TLBSIZE; i++) {
+            if(LRU < tlb[i].last_accessed) {
+                LRU = tlb[i].last_accessed;
+                index = i;
+            }
+        }
+        //swap LRU
+        tlb[index].frame_number = frameNumber;
+        tlb[index].page_number = pageNumber;
+        tlb[index].last_accessed = 0;
+    }
 }
 
 
